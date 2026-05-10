@@ -1,0 +1,1043 @@
+<!doctype html>
+<html lang="ru">
+<head><script>(function(){
+  function makeStore(){
+    var data = {};
+    var api = {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+      setItem: function(k, v){ data[k] = String(v); },
+      removeItem: function(k){ delete data[k]; },
+      clear: function(){ data = {}; },
+      key: function(i){ return Object.keys(data)[i] || null; }
+    };
+    Object.defineProperty(api, 'length', { get: function(){ return Object.keys(data).length; } });
+    return api;
+  }
+  function tryShim(name){
+    var works = false;
+    try { works = !!window[name] && typeof window[name].getItem === 'function'; void window[name].length; }
+    catch (_) { works = false; }
+    if (works) return;
+    try { Object.defineProperty(window, name, { configurable: true, value: makeStore() }); }
+    catch (_) { try { window[name] = makeStore(); } catch (__) {} }
+  }
+  tryShim('localStorage');
+  tryShim('sessionStorage');
+})();</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Диетолог — Дневник питания</title>
+  <style>
+    :root {
+      --bg:      oklch(99% 0.002 240);
+      --surface: oklch(100% 0 0);
+      --fg:      oklch(18% 0.012 250);
+      --muted:   oklch(54% 0.012 250);
+      --border:  oklch(92% 0.005 250);
+      --accent:  oklch(58% 0.18 255);
+      --warn:    oklch(60% 0.18 35);
+      --ok:      oklch(56% 0.16 145);
+      --protein: oklch(55% 0.18 255);
+      --carb:    oklch(65% 0.17 65);
+      --fat:     oklch(60% 0.14 310);
+      --fiber:   oklch(56% 0.16 145);
+      --font-d: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+      --font-b: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-b);
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100dvh;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── App shell ── */
+    .hd {
+      position: sticky; top: 0; z-index: 30;
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 20px;
+      background: color-mix(in oklch, var(--bg) 90%, transparent);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .hd-logo { font-family: var(--font-d); font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+    .hd-sep  { width: 1px; height: 14px; background: var(--border); flex-shrink: 0; }
+    .hd-date { font-size: 12px; color: var(--muted); }
+    .hd-goal { margin-left: auto; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+    @media (max-width: 600px) { .hd-goal { display: none; } }
+
+    /* ── Tab nav ── */
+    .tabs-wrap {
+      position: sticky; top: 49px; z-index: 20;
+      background: color-mix(in oklch, var(--bg) 92%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .tabs {
+      display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; padding: 0 20px; gap: 0;
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab {
+      flex: 0 0 auto;
+      padding: 11px 16px;
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      background: none; border: none; border-bottom: 2px solid transparent;
+      cursor: pointer; white-space: nowrap;
+    }
+    .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+
+    /* ── Panels ── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 24px 20px 72px; }
+
+    /* ── Section label ── */
+    .sl {
+      font-size: 11px; font-weight: 500;
+      letter-spacing: 0.07em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 12px;
+    }
+
+    /* ── KPI row ── */
+    .kpi-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+    @media (max-width: 960px) { .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 560px)  { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .kpi-lbl { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .kpi-val { font-family: var(--font-d); font-size: 28px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+    .kpi-unit { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+    .kpi-sub  { font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi-warn { color: var(--warn); }
+    .kpi-ok   { color: var(--ok); }
+    .kpi-bar  { height: 3px; background: var(--border); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+    .kpi-fill { height: 100%; border-radius: 2px; }
+
+    /* ── Grids ── */
+    .mid  { display: grid; grid-template-columns: 1fr 300px; gap: 12px; margin-bottom: 12px; }
+    @media (max-width: 860px) { .mid { grid-template-columns: 1fr; } }
+    .bot  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    @media (max-width: 760px) { .bot { grid-template-columns: 1fr; } }
+    .bot3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    @media (max-width: 900px) { .bot3 { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .bot3 { grid-template-columns: 1fr; } }
+
+    /* ── Card ── */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+    .card-t { font-size: 13px; font-weight: 500; color: var(--fg); margin-bottom: 16px; letter-spacing: -0.01em; }
+    .card-t-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .card-t-row .card-t { margin-bottom: 0; }
+    .card-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ── Donut ── */
+    .donut-wrap { display: flex; align-items: center; gap: 24px; }
+    .macro-legend { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 0; }
+    .leg-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .leg-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .leg-name { color: var(--muted); flex: 1; min-width: 0; }
+    .leg-val  { font-variant-numeric: tabular-nums; font-weight: 500; }
+    .leg-pct  { font-size: 11px; color: var(--muted); width: 30px; text-align: right; }
+
+    /* ── Goal bars ── */
+    .gbar { margin-bottom: 13px; }
+    .gbar:last-child { margin-bottom: 0; }
+    .gbar-hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; font-size: 12px; }
+    .gbar-name { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .gbar-vals { font-variant-numeric: tabular-nums; font-weight: 500; }
+    .gbar-tgt  { font-weight: 400; color: var(--muted); }
+    .gbar-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .gbar-fill  { height: 100%; border-radius: 3px; }
+
+    /* ── SVG chart ── */
+    .chart-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .chart-scroll svg { display: block; }
+    .axis-lbl { font-size: 10px; fill: var(--muted); font-family: system-ui; font-variant-numeric: tabular-nums; }
+    .grid-line { stroke: var(--border); stroke-width: 1; }
+    .goal-line { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 4 3; }
+    .step-area { fill: oklch(58% 0.18 255 / 0.08); }
+    .step-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+    .meal-dot  { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+
+    /* ── Timeline ── */
+    .tl { position: relative; padding-left: 22px; }
+    .tl::before { content: ''; position: absolute; left: 7px; top: 10px; bottom: 10px; width: 1px; background: var(--border); }
+    .tl-item { position: relative; display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+    .tl-item:last-child { margin-bottom: 0; }
+    .tl-item::before { content: ''; position: absolute; left: -18px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); }
+    .tl-item.dim::before { background: var(--muted); }
+    .tl-time   { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 36px; padding-top: 2px; }
+    .tl-body   { flex: 1; min-width: 0; }
+    .tl-name   { font-size: 13px; font-weight: 450; line-height: 1.3; margin-bottom: 2px; }
+    .tl-macros { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; gap: 8px; flex-wrap: wrap; }
+    .tl-kcal   { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; padding-top: 2px; }
+    .tl-del    { font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; background: none; cursor: pointer; white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
+    .tl-del:hover { color: var(--warn); border-color: var(--warn); }
+
+    /* ── Contribution bars ── */
+    .contrib-grid { display: grid; grid-template-columns: 38px minmax(0,1fr) 58px 38px; align-items: center; gap: 8px 10px; }
+    .contrib-time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .contrib-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
+    .contrib-track { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .contrib-fill  { height: 100%; border-radius: 3px; }
+    .contrib-kcal  { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .contrib-pct   { font-size: 11px; color: var(--muted); text-align: right; white-space: nowrap; }
+    .contrib-total { display: grid; grid-template-columns: 38px minmax(0,1fr) 58px 38px; gap: 8px 10px; align-items: center; padding-top: 10px; border-top: 1px solid var(--border); margin-top: 4px; }
+    .contrib-total-lbl { font-size: 12px; font-weight: 500; }
+
+    /* ── Day comparison ── */
+    .day-cmp { display: grid; grid-template-columns: 1fr 1fr; }
+    .day-col + .day-col { border-left: 1px solid var(--border); padding-left: 20px; }
+    @media (max-width: 500px) {
+      .day-cmp { grid-template-columns: 1fr; }
+      .day-col + .day-col { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 16px; margin-top: 16px; }
+    }
+    .day-name { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .day-kcal-big { font-family: var(--font-d); font-size: 34px; font-weight: 600; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1; margin-bottom: 4px; }
+    .day-sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+    .day-macro-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+    .day-macro-dot  { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .day-macro-name { color: var(--muted); min-width: 66px; }
+    .day-macro-bar  { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .day-macro-fill { height: 100%; border-radius: 2px; }
+    .day-macro-val  { font-variant-numeric: tabular-nums; font-weight: 500; min-width: 38px; text-align: right; }
+
+    /* ── Insights ── */
+    .insights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 640px) { .insights-grid { grid-template-columns: 1fr; } }
+    .insight-item  { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+    .insight-icon  { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 13px; font-weight: 600; }
+    .insight-icon.warn { background: oklch(60% 0.18 35 / 0.1); color: var(--warn); }
+    .insight-icon.ok   { background: oklch(56% 0.16 145 / 0.1); color: var(--ok); }
+    .insight-icon.info { background: oklch(58% 0.18 255 / 0.1); color: var(--accent); }
+    .insight-body  { flex: 1; min-width: 0; }
+    .insight-title { font-weight: 500; font-size: 13px; margin-bottom: 2px; line-height: 1.3; }
+    .insight-desc  { color: var(--muted); line-height: 1.5; }
+
+    /* ── Micro ── */
+    .micro-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 500px) { .micro-grid { grid-template-columns: 1fr; } }
+    .micro-label { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+    .micro-val   { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1; }
+    .micro-unit  { font-size: 12px; font-weight: 400; color: var(--muted); }
+    .micro-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .micro-bar   { height: 3px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
+    .micro-fill  { height: 100%; border-radius: 2px; }
+
+    /* ── Water ── */
+    .water-visual { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .water-cup { width: 28px; height: 36px; border: 1.5px solid var(--border); border-radius: 2px 2px 4px 4px; position: relative; overflow: hidden; }
+    .water-cup.filled { border-color: var(--accent); }
+    .water-cup.filled::after  { content: ''; position: absolute; bottom: 0; left: 0; right: 0; background: oklch(58% 0.18 255 / 0.25); height: 75%; }
+    .water-cup.half::after    { content: ''; position: absolute; bottom: 0; left: 0; right: 0; background: oklch(58% 0.18 255 / 0.15); height: 40%; }
+
+    /* ── Badges ── */
+    .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 4px; line-height: 1.4; }
+    .badge-warn  { background: oklch(60% 0.18 35 / 0.1); color: var(--warn); }
+    .badge-ok    { background: oklch(56% 0.16 145 / 0.1); color: var(--ok); }
+    .badge-muted { background: var(--border); color: var(--muted); }
+
+    /* ── Dishes ── */
+    .dishes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    @media (max-width: 520px) { .dishes { grid-template-columns: 1fr; } }
+    .dish-card  { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+    .dish-name  { font-weight: 500; font-size: 13px; margin-bottom: 4px; line-height: 1.3; }
+    .dish-meta  { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .dish-kcal  { font-size: 20px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin-top: 6px; }
+    .dish-unit  { font-size: 12px; font-weight: 400; color: var(--muted); }
+    .dish-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+    /* ── Data table ── */
+    .dt { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .dt th { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 0 12px 8px 0; text-align: left; border-bottom: 1px solid var(--border); }
+    .dt th:last-child, .dt td:last-child { padding-right: 0; text-align: right; }
+    .dt td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; vertical-align: middle; }
+    .dt tr:last-child td { border-bottom: none; }
+    .dt .row-today td { font-weight: 500; }
+    .dt-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* ── Forms (Panel: Добавить) ── */
+    .form-section { margin-bottom: 20px; }
+    .form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .form-grid.two { grid-template-columns: 1fr 1fr; }
+    @media (max-width: 680px) { .form-grid, .form-grid.two { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 400px) { .form-grid, .form-grid.two { grid-template-columns: 1fr; } }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field.span2 { grid-column: span 2; }
+    .field.span4 { grid-column: 1 / -1; }
+    label { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0.02em; }
+    input[type="text"],
+    input[type="number"],
+    input[type="time"],
+    input[type="date"],
+    textarea {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--fg);
+      font: 16px var(--font-b); /* 16px prevents iOS zoom */
+      line-height: 1.4;
+      appearance: none;
+      -webkit-appearance: none;
+      transition: border-color .15s;
+    }
+    textarea { min-height: 72px; resize: vertical; font-size: 14px; }
+    input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    input::placeholder, textarea::placeholder { color: oklch(76% .008 250); }
+    .check-row { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+    .check-box  { width: 18px; height: 18px; border: 1.5px solid var(--border); border-radius: 4px; background: var(--surface); flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .check-lbl  { font-size: 13px; cursor: pointer; }
+    .btn {
+      width: 100%; min-height: 44px;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 10px 16px;
+      border-radius: 8px; border: none; font: 600 14px var(--font-b);
+      cursor: pointer; transition: opacity .15s;
+    }
+    .btn:active { opacity: .8; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-outline { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); }
+    .btn-danger  { background: var(--surface); color: var(--warn); border: 1px solid oklch(82% .08 30); }
+    .btn-sm { min-height: 34px; font-size: 12px; padding: 6px 10px; border-radius: 6px; }
+    .btn-sm.btn-outline { min-height: 34px; }
+    .btn-sm.btn-danger  { min-height: 34px; }
+
+    /* ── Progress panel ── */
+    .progress-big { font-family: var(--font-d); font-size: 48px; font-weight: 700; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1; }
+    .progress-track { height: 10px; background: var(--border); border-radius: 999px; overflow: hidden; margin: 14px 0 6px; }
+    .progress-fill  { height: 100%; border-radius: 999px; background: var(--ok); }
+    .energy-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .energy-row:last-child { border-bottom: none; }
+    .energy-lbl { color: var(--muted); }
+    .energy-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+    /* ── Saved dishes panel ── */
+    .saved-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    @media (max-width: 560px) { .saved-grid { grid-template-columns: 1fr; } }
+    .saved-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .saved-title { font-weight: 500; font-size: 13px; line-height: 1.3; margin-bottom: 5px; }
+    .saved-kcal  { font-family: var(--font-d); font-size: 24px; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin: 6px 0 2px; }
+    .saved-macro { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .saved-btns  { display: flex; gap: 6px; margin-top: 10px; }
+
+    /* ── Weight log ── */
+    .wt-entry { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .wt-entry:last-child { border-bottom: none; }
+    .wt-val  { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px; }
+    .wt-meta { font-size: 12px; color: var(--muted); }
+
+    a.link { color: var(--accent); text-decoration: none; }
+    .td-warn { color: var(--warn); }
+    .td-ok   { color: var(--ok); }
+  </style>
+</head>
+<body>
+
+<header class="hd">
+  <span class="hd-logo">Диетолог</span>
+  <span class="hd-sep"></span>
+  <span class="hd-date">9 мая 2026</span>
+  <span class="hd-goal">Цель: 2200 ккал · Б 150 г · У &lt;100 г · Кл 30 г</span>
+</header>
+
+<div class="tabs-wrap">
+  <div class="tabs">
+    <button class="tab active" data-tab="dashboard">Дашборд</button>
+    <button class="tab" data-tab="add">Добавить</button>
+    <button class="tab" data-tab="progress">Прогресс</button>
+    <button class="tab" data-tab="dishes">Блюда</button>
+    <button class="tab" data-tab="history">История</button>
+  </div>
+</div>
+
+<!-- ══════════════ PANEL: ДАШБОРД ══════════════ -->
+<div class="panel active" data-panel="dashboard">
+<div class="wrap">
+
+  <div class="sl">Сегодня — 2026-05-09 · 9 записей</div>
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-lbl">Калории</div>
+      <div class="kpi-val kpi-warn">2211<span class="kpi-unit">ккал</span></div>
+      <div class="kpi-sub">Цель 2200 · <span class="kpi-warn">+11 сверх</span></div>
+      <div class="kpi-bar"><div class="kpi-fill" data-w="100%" style="background:var(--warn)"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Белок</div>
+      <div class="kpi-val kpi-ok">149.7<span class="kpi-unit">г</span></div>
+      <div class="kpi-sub">Цель 150 · −0.3</div>
+      <div class="kpi-bar"><div class="kpi-fill" data-w="99.8%" style="background:var(--protein)"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Углеводы</div>
+      <div class="kpi-val kpi-warn">146<span class="kpi-unit">г</span></div>
+      <div class="kpi-sub">Цель &lt;100 · <span class="kpi-warn">+46 сверх</span></div>
+      <div class="kpi-bar"><div class="kpi-fill" data-w="100%" style="background:var(--warn)"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Жиры</div>
+      <div class="kpi-val">111.1<span class="kpi-unit">г</span></div>
+      <div class="kpi-sub">Цели не задано</div>
+      <div class="kpi-bar"><div class="kpi-fill" data-w="65%" style="background:var(--fat)"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Клетчатка</div>
+      <div class="kpi-val kpi-ok">34.7<span class="kpi-unit">г</span></div>
+      <div class="kpi-sub">Цель 30 · <span class="kpi-ok">+4.7</span></div>
+      <div class="kpi-bar"><div class="kpi-fill" data-w="100%" style="background:var(--fiber)"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Вес</div>
+      <div class="kpi-val">84.8<span class="kpi-unit">кг</span></div>
+      <div class="kpi-sub">20:44 · после тренировки</div>
+      <div class="kpi-bar"><div class="kpi-fill" data-w="55%" style="background:var(--accent)"></div></div>
+    </div>
+  </div>
+
+  <!-- Calorie area chart -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-t-row">
+      <div class="card-t">Нарастающие калории — 9 мая</div>
+      <div class="card-meta">9 приёмов · пик в 16:00</div>
+    </div>
+    <div class="chart-scroll">
+      <svg viewBox="0 0 640 190" width="100%" style="min-width:360px">
+        <line class="grid-line" x1="52" y1="140" x2="610" y2="140"/>
+        <text class="axis-lbl" x="47" y="144" text-anchor="end">500</text>
+        <line class="grid-line" x1="52" y1="110" x2="610" y2="110"/>
+        <text class="axis-lbl" x="47" y="114" text-anchor="end">1000</text>
+        <line class="grid-line" x1="52" y1="80" x2="610" y2="80"/>
+        <text class="axis-lbl" x="47" y="84" text-anchor="end">1500</text>
+        <line class="grid-line" x1="52" y1="50" x2="610" y2="50"/>
+        <text class="axis-lbl" x="47" y="54" text-anchor="end">2000</text>
+        <line class="goal-line" x1="52" y1="32" x2="610" y2="32"/>
+        <text class="axis-lbl" x="614" y="36" style="fill:var(--warn)">2200</text>
+        <line class="grid-line" x1="52" y1="170" x2="610" y2="170"/>
+        <text class="axis-lbl" x="137" y="183" text-anchor="middle">09:00</text>
+        <text class="axis-lbl" x="213" y="183" text-anchor="middle">12:00</text>
+        <text class="axis-lbl" x="289" y="183" text-anchor="middle">15:00</text>
+        <text class="axis-lbl" x="365" y="183" text-anchor="middle">18:00</text>
+        <text class="axis-lbl" x="441" y="183" text-anchor="middle">21:00</text>
+        <line class="grid-line" x1="137" y1="170" x2="137" y2="174"/>
+        <line class="grid-line" x1="213" y1="170" x2="213" y2="174"/>
+        <line class="grid-line" x1="289" y1="170" x2="289" y2="174"/>
+        <line class="grid-line" x1="365" y1="170" x2="365" y2="174"/>
+        <line class="grid-line" x1="441" y1="170" x2="441" y2="174"/>
+        <!-- scale: 0.0575 px/kcal; x: 0.58125 px/min from 08:00=52 -->
+        <!-- 11:02→x157.8 cumul618→y134.5 | 11:07→x160.7 681→130.8 | 15:26→x311.2 799→124.1 -->
+        <!-- 16:00→x331 1660→74.5 | 17:00→x365.9 1670→74.0 | 19:00→x435.6 1995→55.3 -->
+        <!-- 21:05→x508.3 2055→51.8 | 22:26→x555.4 2211→42.8 | 22:35→x560.6 2211→42.8 -->
+        <path class="step-area" d="M 52,170 H 157.8 V 134.5 H 160.7 V 130.8 H 311.2 V 124.1 H 331 V 74.5 H 365.9 V 74.0 H 435.6 V 55.3 H 508.3 V 51.8 H 555.4 V 42.8 H 560.6 V 42.8 H 610 V 170 Z"/>
+        <path class="step-line" d="M 52,170 H 157.8 V 134.5 H 160.7 V 130.8 H 311.2 V 124.1 H 331 V 74.5 H 365.9 V 74.0 H 435.6 V 55.3 H 508.3 V 51.8 H 555.4 V 42.8 H 560.6 V 42.8 H 610"/>
+        <circle class="meal-dot" cx="157.8" cy="134.5" r="4"/>
+        <circle class="meal-dot" cx="160.7" cy="130.8" r="4"/>
+        <circle class="meal-dot" cx="311.2" cy="124.1" r="4"/>
+        <circle class="meal-dot" cx="331" cy="74.5" r="4"/>
+        <circle class="meal-dot" cx="365.9" cy="74" r="4"/>
+        <circle class="meal-dot" cx="435.6" cy="55.3" r="4"/>
+        <circle class="meal-dot" cx="508.3" cy="51.8" r="4"/>
+        <circle class="meal-dot" cx="555.4" cy="42.8" r="4"/>
+        <text class="axis-lbl" x="157.8" y="122" text-anchor="middle" style="font-size:9px">618</text>
+        <text class="axis-lbl" x="331" y="62" text-anchor="middle" style="font-size:9px">861</text>
+        <text class="axis-lbl" x="555.4" y="30" text-anchor="middle" style="font-size:9px;fill:var(--ok)">+156</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Macro donut + goal bars -->
+  <div class="mid">
+    <div class="card">
+      <div class="card-t">Распределение макронутриентов</div>
+      <div class="donut-wrap">
+        <svg width="148" height="148" viewBox="0 0 148 148" style="flex-shrink:0">
+          <circle cx="74" cy="74" r="52" fill="none" stroke="var(--border)" stroke-width="22"/>
+          <!-- Protein: 149.7/406.8=36.8% → 326.73*0.368=120.2 -->
+          <circle cx="74" cy="74" r="52" fill="none" stroke="var(--protein)" stroke-width="22"
+                  stroke-dasharray="120.2 326.73" stroke-dashoffset="0" transform="rotate(-90 74 74)"/>
+          <!-- Carbs: 146/406.8=35.9% → 117.3, offset=-120.2 -->
+          <circle cx="74" cy="74" r="52" fill="none" stroke="var(--carb)" stroke-width="22"
+                  stroke-dasharray="117.3 326.73" stroke-dashoffset="-120.2" transform="rotate(-90 74 74)"/>
+          <!-- Fat: 111.1/406.8=27.3% → 89.2, offset=-237.5 -->
+          <circle cx="74" cy="74" r="52" fill="none" stroke="var(--fat)" stroke-width="22"
+                  stroke-dasharray="89.2 326.73" stroke-dashoffset="-237.5" transform="rotate(-90 74 74)"/>
+          <text x="74" y="70" text-anchor="middle" font-size="20" font-weight="600" fill="var(--fg)" font-family="system-ui">406.8</text>
+          <text x="74" y="86" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="system-ui">г итого</text>
+        </svg>
+        <div class="macro-legend">
+          <div class="leg-item"><span class="leg-dot" style="background:var(--protein)"></span><span class="leg-name">Белок</span><span class="leg-val">149.7 г</span><span class="leg-pct">37%</span></div>
+          <div class="leg-item"><span class="leg-dot" style="background:var(--carb)"></span><span class="leg-name">Углеводы</span><span class="leg-val">146 г</span><span class="leg-pct">36%</span></div>
+          <div class="leg-item"><span class="leg-dot" style="background:var(--fat)"></span><span class="leg-name">Жиры</span><span class="leg-val">111.1 г</span><span class="leg-pct">27%</span></div>
+          <div class="leg-item"><span class="leg-dot" style="background:var(--fiber)"></span><span class="leg-name">Клетчатка</span><span class="leg-val">34.7 г</span><span class="leg-pct">—</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-t">Прогресс к целям</div>
+      <div class="gbar">
+        <div class="gbar-hd"><span class="gbar-name">Калории <span class="badge badge-warn">↑ сверх</span></span><span class="gbar-vals td-warn">2211 <span class="gbar-tgt" style="color:var(--muted)">/ 2200</span></span></div>
+        <div class="gbar-track"><div class="gbar-fill" data-w="100%" style="background:var(--warn)"></div></div>
+      </div>
+      <div class="gbar">
+        <div class="gbar-hd"><span class="gbar-name">Белок</span><span class="gbar-vals kpi-ok">149.7 г <span class="gbar-tgt" style="color:var(--muted)">/ 150 г</span></span></div>
+        <div class="gbar-track"><div class="gbar-fill" data-w="99.8%" style="background:var(--protein)"></div></div>
+      </div>
+      <div class="gbar">
+        <div class="gbar-hd"><span class="gbar-name">Углеводы <span class="badge badge-warn">↑ сверх</span></span><span class="gbar-vals td-warn">146 г <span class="gbar-tgt" style="color:var(--muted)">/ &lt;100 г</span></span></div>
+        <div class="gbar-track"><div class="gbar-fill" data-w="100%" style="background:var(--warn)"></div></div>
+      </div>
+      <div class="gbar">
+        <div class="gbar-hd"><span class="gbar-name">Клетчатка <span class="badge badge-ok">✓ норма</span></span><span class="gbar-vals kpi-ok">34.7 г <span class="gbar-tgt" style="color:var(--muted)">/ 30 г</span></span></div>
+        <div class="gbar-track"><div class="gbar-fill" data-w="100%" style="background:var(--fiber)"></div></div>
+      </div>
+      <div class="gbar">
+        <div class="gbar-hd"><span class="gbar-name">Жиры</span><span class="gbar-vals">111.1 г <span class="gbar-tgt">— нет цели</span></span></div>
+        <div class="gbar-track"><div class="gbar-fill" data-w="65%" style="background:var(--fat)"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meal contribution -->
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-t-row">
+      <div class="card-t">Вклад приёмов пищи</div>
+      <div class="card-meta">итого 2211 ккал</div>
+    </div>
+    <div class="contrib-grid">
+      <span class="contrib-time">11:02</span>
+      <div><div class="contrib-name">Тунцовый бутерброд на цельнозерновом хлебе</div><div class="contrib-track"><div class="contrib-fill" data-w="27.9%" style="background:var(--accent)"></div></div></div>
+      <span class="contrib-kcal">618 ккал</span><span class="contrib-pct">27.9%</span>
+
+      <span class="contrib-time">11:07</span>
+      <div><div class="contrib-name">Гирин-Ми, 330 мл</div><div class="contrib-track"><div class="contrib-fill" data-w="2.8%" style="background:var(--muted)"></div></div></div>
+      <span class="contrib-kcal">63 ккал</span><span class="contrib-pct">2.8%</span>
+
+      <span class="contrib-time">15:26</span>
+      <div><div class="contrib-name">Апельсиновый сок натуральный, 250 мл</div><div class="contrib-track"><div class="contrib-fill" data-w="5.3%" style="background:var(--carb)"></div></div></div>
+      <span class="contrib-kcal">118 ккал</span><span class="contrib-pct">5.3%</span>
+
+      <span class="contrib-time">16:00</span>
+      <div><div class="contrib-name" style="font-weight:500">Стейк-сэндвич BRUNCH с авокадо, 400 г</div><div class="contrib-track"><div class="contrib-fill" data-w="38.9%" style="background:var(--warn)"></div></div></div>
+      <span class="contrib-kcal" style="color:var(--warn)">861 ккал</span><span class="contrib-pct" style="color:var(--warn)">38.9%</span>
+
+      <span class="contrib-time">17:00</span>
+      <div><div class="contrib-name">Red Bull без сахара, 250 мл</div><div class="contrib-track"><div class="contrib-fill" data-w="0.5%" style="background:var(--muted)"></div></div></div>
+      <span class="contrib-kcal">10 ккал</span><span class="contrib-pct">0.5%</span>
+
+      <span class="contrib-time">19:00</span>
+      <div><div class="contrib-name">WOK Конструктор базовый, ~300 г</div><div class="contrib-track"><div class="contrib-fill" data-w="14.7%" style="background:var(--protein)"></div></div></div>
+      <span class="contrib-kcal">325 ккал</span><span class="contrib-pct">14.7%</span>
+
+      <span class="contrib-time">21:05</span>
+      <div><div class="contrib-name">Сладкий чили-соус, 30 г</div><div class="contrib-track"><div class="contrib-fill" data-w="2.7%" style="background:var(--muted)"></div></div></div>
+      <span class="contrib-kcal">60 ккал</span><span class="contrib-pct">2.7%</span>
+
+      <span class="contrib-time">22:26</span>
+      <div><div class="contrib-name" style="color:var(--ok)">Протеиновое печенье, 1 шт</div><div class="contrib-track"><div class="contrib-fill" data-w="7.1%" style="background:var(--fiber)"></div></div></div>
+      <span class="contrib-kcal" style="color:var(--ok)">156 ккал</span><span class="contrib-pct">7.1%</span>
+
+      <span class="contrib-time">22:35</span>
+      <div><div class="contrib-name">Pepsi 0 калорий, 330 мл</div><div class="contrib-track"><div class="contrib-fill" data-w="0%" style="background:var(--muted)"></div></div></div>
+      <span class="contrib-kcal">0 ккал</span><span class="contrib-pct">0%</span>
+
+      <div class="contrib-total" style="grid-column:1/-1">
+        <span></span><span class="contrib-total-lbl">Итого за день</span>
+        <span class="contrib-kcal">2211 ккал</span><span class="contrib-pct">100%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Today meals + summary -->
+  <div class="bot">
+    <div class="card">
+      <div class="card-t-row">
+        <div class="card-t">Приёмы пищи — 9 мая 2026</div>
+        <span class="badge badge-ok">9 записей</span>
+      </div>
+      <div class="tl">
+        <div class="tl-item"><span class="tl-time">11:02</span><div class="tl-body"><div class="tl-name">Тунцовый бутерброд на цельнозерновом хлебе</div><div class="tl-macros"><span>Б 52.9</span><span>Ж 33.8</span><span>У 19.8</span><span>Кл 11.4</span></div></div><span class="tl-kcal">618</span></div>
+        <div class="tl-item"><span class="tl-time">11:07</span><div class="tl-body"><div class="tl-name">Гирин-Ми, 330 мл</div><div class="tl-macros"><span>У 15.8</span></div></div><span class="tl-kcal">63</span></div>
+        <div class="tl-item"><span class="tl-time">15:26</span><div class="tl-body"><div class="tl-name">Апельсиновый сок натуральный, 250 мл</div><div class="tl-macros"><span>Б 1.7</span><span>Ж 0.4</span><span>У 27.5</span><span>Кл 0.8</span></div></div><span class="tl-kcal">118</span></div>
+        <div class="tl-item"><span class="tl-time">16:00</span><div class="tl-body"><div class="tl-name">Стейк-сэндвич BRUNCH с авокадо, 400 г</div><div class="tl-macros"><span>Б 44.6</span><span>Ж 51.9</span><span>У 54.3</span><span>Кл 5.7</span></div></div><span class="tl-kcal" style="color:var(--warn)">861</span></div>
+        <div class="tl-item"><span class="tl-time">17:00</span><div class="tl-body"><div class="tl-name">Red Bull без сахара, 250 мл</div><div class="tl-macros"><span>У 1</span></div></div><span class="tl-kcal">10</span></div>
+        <div class="tl-item"><span class="tl-time">19:00</span><div class="tl-body"><div class="tl-name">WOK Конструктор базовый, ~300 г</div><div class="tl-macros"><span>Б 38</span><span>Ж 15.2</span><span>У 9</span><span>Кл 1.5</span></div></div><span class="tl-kcal">325</span></div>
+        <div class="tl-item"><span class="tl-time">21:05</span><div class="tl-body"><div class="tl-name">Сладкий чили-соус, 30 г</div><div class="tl-macros"><span>Б 0.5</span><span>Ж 0.3</span><span>У 13</span><span>Кл 0.3</span></div></div><span class="tl-kcal">60</span></div>
+        <div class="tl-item"><span class="tl-time">22:26</span><div class="tl-body"><div class="tl-name" style="color:var(--ok)">Протеиновое печенье, 1 шт</div><div class="tl-macros"><span>Б 12</span><span>Ж 9.5</span><span>У 5.6</span><span>Кл 15</span></div></div><span class="tl-kcal" style="color:var(--ok)">156</span></div>
+        <div class="tl-item"><span class="tl-time">22:35</span><div class="tl-body"><div class="tl-name">Pepsi 0 калорий, 330 мл</div><div class="tl-macros"><span>—</span></div></div><span class="tl-kcal" style="color:var(--muted)">0</span></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card">
+        <div class="card-t">Сводка по дням</div>
+        <div style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px">
+            <span style="color:var(--muted);min-width:52px">09 мая</span>
+            <div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden"><div data-w="100%" style="height:100%;background:var(--warn);border-radius:4px"></div></div>
+            <span style="font-variant-numeric:tabular-nums;font-weight:500;min-width:52px;text-align:right">2211 ккал</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:12px">
+            <span style="color:var(--muted);min-width:52px">08 мая</span>
+            <div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden"><div data-w="44.2%" style="height:100%;background:var(--muted);border-radius:4px"></div></div>
+            <span style="font-variant-numeric:tabular-nums;font-weight:500;min-width:52px;text-align:right">972 ккал</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">Цель: 2200 ккал/день</div>
+        </div>
+        <div class="dt-scroll"><table class="dt">
+          <thead><tr><th>День</th><th>ккал</th><th>Б</th><th>У</th><th>Ж</th><th>Кл</th><th>Зап.</th></tr></thead>
+          <tbody>
+            <tr class="row-today"><td><a class="link" href="#">2026-05-09</a></td><td class="td-warn">2211</td><td>149.7</td><td class="td-warn">146</td><td>111.1</td><td class="td-ok">34.7</td><td>9</td></tr>
+            <tr><td style="color:var(--muted)">2026-05-08</td><td>972</td><td>76.8</td><td>101.4</td><td>30.6</td><td style="color:var(--muted)">—</td><td>2</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <div class="card-t">Сохранённые блюда</div>
+        <div class="dishes">
+          <div class="dish-card"><div class="dish-name">Тунцовый бутерброд</div><div class="dish-meta">1 порция · ~342 г</div><div class="dish-kcal">618<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 52.9 · Ж 33.8 · У 19.8</div></div>
+          <div class="dish-card"><div class="dish-name">Сыр творожный Хохла</div><div class="dish-meta">100 г</div><div class="dish-kcal">232<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 6 · Ж 21.3 · У 4</div></div>
+          <div class="dish-card"><div class="dish-name">Хачапури с говядиной</div><div class="dish-meta">360 г</div><div class="dish-kcal">792<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 46.8 · Ж 30.6 · У 86.4</div></div>
+          <div class="dish-card"><div class="dish-name">Экспонента Био СКР</div><div class="dish-meta">500 мл (пачка)</div><div class="dish-kcal">180<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 30 · Ж 0 · У 15</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Yesterday -->
+  <div class="sl" style="margin-top:8px">Предыдущий день — 2026-05-08</div>
+  <div class="bot">
+    <div class="card">
+      <div class="card-t-row"><div class="card-t">Приёмы пищи — 8 мая 2026</div><span class="badge badge-muted">2 записи</span></div>
+      <div class="tl">
+        <div class="tl-item dim"><span class="tl-time">обед</span><div class="tl-body"><div class="tl-name">Хачапури с говядиной, 360 г</div><div class="tl-macros"><span>Б 46.8</span><span>Ж 30.6</span><span>У 86.4</span></div></div><span class="tl-kcal">792</span></div>
+        <div class="tl-item dim"><span class="tl-time">вечер</span><div class="tl-body"><div class="tl-name">Экспонента Био СКР, 500 мл</div><div class="tl-macros"><span>Б 30</span><span>Ж 0</span><span>У 15</span></div></div><span class="tl-kcal">180</span></div>
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
+        <div><div style="color:var(--muted);margin-bottom:3px">Калории</div><div style="font-weight:600;font-size:16px;font-variant-numeric:tabular-nums">972<span style="font-size:11px;font-weight:400;color:var(--muted)"> ккал</span></div></div>
+        <div><div style="color:var(--muted);margin-bottom:3px">Белок</div><div style="font-weight:600;font-size:16px;font-variant-numeric:tabular-nums">76.8<span style="font-size:11px;font-weight:400;color:var(--muted)"> г</span></div></div>
+        <div><div style="color:var(--muted);margin-bottom:3px">Углеводы</div><div style="font-weight:600;font-size:16px;font-variant-numeric:tabular-nums">101.4<span style="font-size:11px;font-weight:400;color:var(--muted)"> г</span></div></div>
+        <div><div style="color:var(--muted);margin-bottom:3px">Жиры</div><div style="font-weight:600;font-size:16px;font-variant-numeric:tabular-nums">30.6<span style="font-size:11px;font-weight:400;color:var(--muted)"> г</span></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-t">Сравнение дней</div>
+      <div class="day-cmp">
+        <div class="day-col">
+          <div class="day-name">08 мая</div>
+          <div class="day-kcal-big">972<span style="font-size:15px;font-weight:400;color:var(--muted)"> ккал</span></div>
+          <div class="day-sub">44% от цели · 2 приёма</div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--protein)"></span><span class="day-macro-name">Белок</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="51.2%" style="background:var(--protein)"></div></div><span class="day-macro-val">76.8 г</span></div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--carb)"></span><span class="day-macro-name">Углеводы</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="100%" style="background:var(--warn)"></div></div><span class="day-macro-val" style="color:var(--warn)">101.4 г</span></div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--fat)"></span><span class="day-macro-name">Жиры</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="30.1%" style="background:var(--fat)"></div></div><span class="day-macro-val">30.6 г</span></div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--fiber)"></span><span class="day-macro-name">Клетчатка</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="0%" style="background:var(--fiber)"></div></div><span class="day-macro-val" style="color:var(--muted)">—</span></div>
+        </div>
+        <div class="day-col" style="padding-left:20px">
+          <div class="day-name" style="color:var(--accent)">09 мая (сегодня)</div>
+          <div class="day-kcal-big">2211<span style="font-size:15px;font-weight:400;color:var(--muted)"> ккал</span></div>
+          <div class="day-sub">100% цели · 9 приёмов</div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--protein)"></span><span class="day-macro-name">Белок</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="99.8%" style="background:var(--protein)"></div></div><span class="day-macro-val">149.7 г</span></div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--carb)"></span><span class="day-macro-name">Углеводы</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="100%" style="background:var(--warn)"></div></div><span class="day-macro-val" style="color:var(--warn)">146 г</span></div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--fat)"></span><span class="day-macro-name">Жиры</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="65%" style="background:var(--fat)"></div></div><span class="day-macro-val">111.1 г</span></div>
+          <div class="day-macro-row"><span class="day-macro-dot" style="background:var(--fiber)"></span><span class="day-macro-name">Клетчатка</span><div class="day-macro-bar"><div class="day-macro-fill" data-w="100%" style="background:var(--fiber)"></div></div><span class="day-macro-val" style="color:var(--ok)">34.7 г</span></div>
+        </div>
+      </div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500">Калории vs цель 2200</div>
+        <svg viewBox="0 0 300 90" width="100%" style="overflow:visible">
+          <line x1="0" y1="0" x2="300" y2="0" stroke="var(--border)" stroke-width="1"/>
+          <text x="-4" y="4" text-anchor="end" font-size="9" fill="var(--muted)" font-family="system-ui">2200</text>
+          <line x1="0" y1="39.6" x2="300" y2="39.6" stroke="var(--border)" stroke-width="1"/>
+          <text x="-4" y="43" text-anchor="end" font-size="9" fill="var(--muted)" font-family="system-ui">1000</text>
+          <line x1="0" y1="0" x2="300" y2="0" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <rect x="40" y="50.2" width="70" height="39.8" fill="var(--muted)" rx="3" opacity="0.5"/>
+          <text x="75" y="45" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="system-ui" font-weight="500">972</text>
+          <!-- 2211/2200 ≈ 100.5% → slightly over, bar height 90px -->
+          <rect x="160" y="0" width="70" height="90" fill="var(--warn)" rx="3" opacity="0.65"/>
+          <text x="195" y="-5" text-anchor="middle" font-size="10" fill="var(--warn)" font-family="system-ui" font-weight="500">2211</text>
+          <text x="75" y="106" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="system-ui">08 мая</text>
+          <text x="195" y="106" text-anchor="middle" font-size="10" fill="var(--fg)" font-family="system-ui" font-weight="500">09 мая</text>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Micronutrients + Water -->
+  <div class="sl" style="margin-top:8px">Микронутриенты — 9 мая</div>
+  <div class="bot3" style="margin-bottom:12px">
+    <div class="card">
+      <div class="card-t">Жиры — детально</div>
+      <div class="micro-grid">
+        <div><div class="micro-label">Насыщенные</div><div class="micro-val">~28<span class="micro-unit"> г</span></div><div class="micro-sub">рекоменд. &lt;24 г</div><div class="micro-bar"><div class="micro-fill" data-w="100%" style="background:var(--warn)"></div></div></div>
+        <div><div class="micro-label">Ненасыщенные</div><div class="micro-val">~83<span class="micro-unit"> г</span></div><div class="micro-sub">полезные жиры</div><div class="micro-bar"><div class="micro-fill" data-w="83%" style="background:var(--ok)"></div></div></div>
+        <div><div class="micro-label">Омега-3</div><div class="micro-val">~2.1<span class="micro-unit"> г</span></div><div class="micro-sub">из тунца</div><div class="micro-bar"><div class="micro-fill" data-w="84%" style="background:var(--accent)"></div></div></div>
+        <div><div class="micro-label">Холестерин</div><div class="micro-val">~180<span class="micro-unit"> мг</span></div><div class="micro-sub">норма &lt;300 мг</div><div class="micro-bar"><div class="micro-fill" data-w="60%" style="background:var(--muted);opacity:.6"></div></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-t">Углеводы — детально</div>
+      <div class="micro-grid" style="margin-bottom:12px">
+        <div><div class="micro-label">Сахара</div><div class="micro-val">~61<span class="micro-unit"> г</span></div><div class="micro-sub">рекоменд. &lt;50 г</div><div class="micro-bar"><div class="micro-fill" data-w="100%" style="background:var(--warn)"></div></div></div>
+        <div><div class="micro-label">Крахмал</div><div class="micro-val">~60<span class="micro-unit"> г</span></div><div class="micro-sub">из хлеба, WOK</div><div class="micro-bar"><div class="micro-fill" data-w="60%" style="background:var(--carb)"></div></div></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Источники углеводов</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Стейк-сэндвич</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:var(--warn)">54.3 г</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Апельсиновый сок</span><span style="font-variant-numeric:tabular-nums;font-weight:500">27.5 г</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Чили-соус + Гирин-Ми</span><span style="font-variant-numeric:tabular-nums;font-weight:500">28.8 г</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Прочее</span><span style="font-variant-numeric:tabular-nums;font-weight:500">35.4 г</span></div>
+        <div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid var(--border);font-weight:500"><span>Итого</span><span style="font-variant-numeric:tabular-nums;color:var(--warn)">146 г</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-t">Вода и напитки</div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Жидкость из рациона</div>
+        <div class="water-visual">
+          <div class="water-cup filled"></div><div class="water-cup filled"></div><div class="water-cup filled"></div><div class="water-cup filled"></div><div class="water-cup half"></div><div class="water-cup"></div><div class="water-cup"></div><div class="water-cup"></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted)">~1160 мл из 8 стаканов (2000 мл)</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:12px">
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Гирин-Ми</span><span style="font-variant-numeric:tabular-nums;font-weight:500">330 мл</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Апельсиновый сок</span><span style="font-variant-numeric:tabular-nums;font-weight:500">250 мл</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Red Bull</span><span style="font-variant-numeric:tabular-nums;font-weight:500">250 мл</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Pepsi 0</span><span style="font-variant-numeric:tabular-nums;font-weight:500">330 мл</span></div>
+        <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border);font-weight:500"><span>Итого напитков</span><span style="font-variant-numeric:tabular-nums;color:var(--accent)">1160 мл</span></div>
+        <div style="font-size:11px;color:var(--muted)">Рекомендуется ещё ~840 мл воды</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key insights -->
+  <div class="sl">Ключевые выводы — 9 мая</div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="insights-grid">
+      <div class="insight-item">
+        <div class="insight-icon warn">↑</div>
+        <div class="insight-body">
+          <div class="insight-title">Углеводы превышены на 46 г</div>
+          <div class="insight-desc">Основные источники: стейк-сэндвич (54.3 г) + апельсиновый сок (27.5 г). При цели &lt;100 г — суммарно 146 г. Замена сока водой сэкономит ≈110 ккал и 27 г углеводов.</div>
+        </div>
+      </div>
+      <div class="insight-item">
+        <div class="insight-icon ok">✓</div>
+        <div class="insight-body">
+          <div class="insight-title">Клетчатка выполнена — 34.7 г из 30 г</div>
+          <div class="insight-desc">Протеиновое печенье (+15 г клетчатки в 22:26) полностью закрыло ранее существовавший дефицит. Итог: +4.7 г сверх нормы.</div>
+        </div>
+      </div>
+      <div class="insight-item">
+        <div class="insight-icon ok">✓</div>
+        <div class="insight-body">
+          <div class="insight-title">Белок — 99.8% цели, отлично</div>
+          <div class="insight-desc">149.7 г из 150 г. Лучшие источники: тунец (52.9 г), WOK (38 г), стейк-сэндвич (44.6 г). Один из лучших показателей по белку.</div>
+        </div>
+      </div>
+      <div class="insight-item">
+        <div class="insight-icon warn">↑</div>
+        <div class="insight-body">
+          <div class="insight-title">Калории — +11 ккал к цели</div>
+          <div class="insight-desc">2211 из 2200 ккал. Незначительное превышение. Дефицит с учётом тренировки (551.2 ккал) составил +340.2 ккал — прогресс к цели −7 кг жира идёт в плане.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /panel dashboard -->
+
+<!-- ══════════════ PANEL: ДОБАВИТЬ ══════════════ -->
+<div class="panel" data-panel="add">
+<div class="wrap">
+
+  <div class="sl">Добавить в день — 2026-05-09</div>
+  <div class="bot">
+    <!-- Add entry form -->
+    <div class="card form-section">
+      <div class="card-t">Новая запись питания</div>
+      <div class="form-grid">
+        <div class="field span4"><label>Название блюда или продукта</label><input type="text" placeholder="Например: творог 5%"></div>
+        <div class="field span4"><label>Порция</label><input type="text" placeholder="150 г / 1 шт / порция / 250 мл"></div>
+        <div class="field"><label>ккал</label><input type="number" placeholder="0" min="0"></div>
+        <div class="field"><label>Белок, г</label><input type="number" placeholder="0" min="0" step="0.1"></div>
+        <div class="field"><label>Жиры, г</label><input type="number" placeholder="0" min="0" step="0.1"></div>
+        <div class="field"><label>Углеводы, г</label><input type="number" placeholder="0" min="0" step="0.1"></div>
+        <div class="field span2"><label>Клетчатка, г</label><input type="number" placeholder="0" min="0" step="0.1" value="0"></div>
+        <div class="field span2"><label>Время</label><input type="time" value="12:30"></div>
+        <div class="field span4"><label>Заметка (необязательно)</label><textarea placeholder="Комментарий к записи…"></textarea></div>
+        <div class="field span4">
+          <div class="check-row">
+            <div class="check-box"></div>
+            <span class="check-lbl">Сохранить как шаблон блюда</span>
+          </div>
+        </div>
+        <div class="field span4"><button type="button" class="btn btn-primary">Добавить</button></div>
+      </div>
+
+      <!-- Saved dishes quick-add -->
+      <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Быстрое добавление из сохранённых</div>
+        <div class="dishes">
+          <div class="dish-card"><div class="dish-name">Тунцовый бутерброд</div><div class="dish-meta">1 порция (~342 г)</div><div class="dish-kcal">618<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 52.9 · Ж 33.8 · У 19.8 · Кл 11.4</div><div class="dish-actions"><button type="button" class="btn btn-outline btn-sm">+ Добавить</button></div></div>
+          <div class="dish-card"><div class="dish-name">Сыр творожный Хохла</div><div class="dish-meta">100 г</div><div class="dish-kcal">232<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 6 · Ж 21.3 · У 4 · Кл 2</div><div class="dish-actions"><button type="button" class="btn btn-outline btn-sm">+ Добавить</button></div></div>
+          <div class="dish-card"><div class="dish-name">Хачапури с говядиной</div><div class="dish-meta">360 г</div><div class="dish-kcal">792<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 46.8 · Ж 30.6 · У 86.4</div><div class="dish-actions"><button type="button" class="btn btn-outline btn-sm">+ Добавить</button></div></div>
+          <div class="dish-card"><div class="dish-name">Экспонента Био СКР</div><div class="dish-meta">500 мл (пачка)</div><div class="dish-kcal">180<span class="dish-unit"> ккал</span></div><div class="dish-meta" style="margin-top:2px">Б 30 · Ж 0 · У 15</div><div class="dish-actions"><button type="button" class="btn btn-outline btn-sm">+ Добавить</button></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Weight form + log -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card form-section">
+        <div class="card-t">Записать вес</div>
+        <div class="form-grid two">
+          <div class="field span2"><label>Вес, кг</label><input type="number" placeholder="86.5" step="0.1" min="30" max="300"></div>
+          <div class="field"><label>Дата</label><input type="date" value="2026-05-09"></div>
+          <div class="field"><label>Время</label><input type="time" value="12:30"></div>
+          <div class="field span2"><label>Заметка</label><input type="text" placeholder="утро / после тренировки…"></div>
+          <div class="field span2"><button type="button" class="btn btn-primary">Записать вес</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-t">Вес за день — 2026-05-09</div>
+        <div class="wt-entry">
+          <div>
+            <div class="wt-val">84.8 кг</div>
+            <div class="wt-meta">2026-05-09 · 20:44 · утро / после тренировки</div>
+          </div>
+          <button type="button" class="btn btn-danger btn-sm">Удалить</button>
+        </div>
+      </div>
+
+      <!-- Today records quick view -->
+      <div class="card">
+        <div class="card-t-row"><div class="card-t">Записи сегодня</div><span class="badge badge-ok">9</span></div>
+        <div style="display:flex;flex-direction:column">
+          <div class="tl-item" style="padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:0;display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">22:35 Pepsi 0 калорий</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">0</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">22:26 Протеиновое печенье</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:var(--ok)">156</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">21:05 Сладкий чили-соус</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">60</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">19:00 WOK Конструктор</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">325</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">17:00 Red Bull без сахара</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">10</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">16:00 Стейк-сэндвич BRUNCH</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:var(--warn)">861</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">15:26 Апельсиновый сок</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">118</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">11:07 Гирин-Ми</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">63</span><button class="tl-del">Удалить</button></span></div>
+          <div style="padding:8px 0;display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:var(--muted)">11:02 Тунцовый бутерброд</span><span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">618</span><button class="tl-del">Удалить</button></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /panel add -->
+
+<!-- ══════════════ PANEL: ПРОГРЕСС ══════════════ -->
+<div class="panel" data-panel="progress">
+<div class="wrap">
+
+  <div class="sl">Прогресс к цели — −7 кг жира</div>
+  <div class="bot">
+    <div class="card">
+      <div class="card-t">Накопленный дефицит</div>
+      <div class="progress-big">340.2<span style="font-size:18px;font-weight:400;color:var(--muted)"> ккал</span></div>
+      <div style="font-size:13px;color:var(--muted);margin-top:6px">≈ 37.8 г жира · 0.6% пути</div>
+      <div class="progress-track"><div class="progress-fill" data-w="0.6%" style="width:0.6%"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)">
+        <span>0 ккал</span><span>Цель: 55 000 ккал</span>
+      </div>
+      <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Прогноз</div>
+        <div style="font-family:var(--font-d);font-size:40px;font-weight:700;letter-spacing:-0.04em;font-variant-numeric:tabular-nums;line-height:1">161<span style="font-size:16px;font-weight:400;color:var(--muted)"> дней</span></div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">при среднем дефиците 340.2 ккал/день</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card">
+        <div class="card-t">Энергетический баланс — 2026-05-09</div>
+        <div class="energy-row"><span class="energy-lbl">Базовый расход</span><span class="energy-val">2000 ккал</span></div>
+        <div class="energy-row"><span class="energy-lbl">+ Тренировка</span><span class="energy-val" style="color:var(--ok)">+551.2 ккал</span></div>
+        <div class="energy-row"><span class="energy-lbl">Суммарный расход</span><span class="energy-val">2551.2 ккал</span></div>
+        <div class="energy-row"><span class="energy-lbl">Съедено</span><span class="energy-val" style="color:var(--warn)">2211 ккал</span></div>
+        <div class="energy-row" style="border-bottom:none"><span class="energy-lbl" style="font-weight:500">Дефицит</span><span class="energy-val" style="color:var(--ok)">+340.2 ккал</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-t">Цели по макросам — итог дня</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="color:var(--muted)">Белок</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:var(--ok)">149.7 / 150 г</span></div>
+            <div class="kpi-bar"><div class="kpi-fill" data-w="99.8%" style="background:var(--protein)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="color:var(--muted)">Углеводы</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:var(--warn)">146 / &lt;100 г</span></div>
+            <div class="kpi-bar"><div class="kpi-fill" data-w="100%" style="background:var(--warn)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="color:var(--muted)">Клетчатка</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:var(--ok)">34.7 / 30 г</span></div>
+            <div class="kpi-bar"><div class="kpi-fill" data-w="100%" style="background:var(--fiber)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="color:var(--muted)">Калории</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:var(--warn)">2211 / 2200</span></div>
+            <div class="kpi-bar"><div class="kpi-fill" data-w="100%" style="background:var(--warn)"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /panel progress -->
+
+<!-- ══════════════ PANEL: БЛЮДА ══════════════ -->
+<div class="panel" data-panel="dishes">
+<div class="wrap">
+
+  <div class="sl">Сохранённые блюда</div>
+  <div class="bot">
+    <div class="card">
+      <div class="card-t-row"><div class="card-t">Библиотека блюд</div><span class="badge badge-muted">4 блюда</span></div>
+      <div class="saved-grid">
+        <div class="saved-card">
+          <div class="saved-title">Тунцовый бутерброд на цельнозерновом хлебе</div>
+          <div class="saved-meta">1 порция (~342 г)</div>
+          <div class="saved-kcal">618<span style="font-size:13px;font-weight:400;color:var(--muted)"> ккал</span></div>
+          <div class="saved-macro">Б 52.9 · Ж 33.8 · У 19.8 · Кл 11.4</div>
+          <div class="saved-btns">
+            <button type="button" class="btn btn-outline btn-sm" style="flex:1">+ Добавить</button>
+            <button type="button" class="btn btn-danger btn-sm">Удалить</button>
+          </div>
+        </div>
+        <div class="saved-card">
+          <div class="saved-title">Сыр творожный Хохла на зеленью</div>
+          <div class="saved-meta">100 г</div>
+          <div class="saved-kcal">232<span style="font-size:13px;font-weight:400;color:var(--muted)"> ккал</span></div>
+          <div class="saved-macro">Б 6 · Ж 21.3 · У 4 · Кл 2</div>
+          <div class="saved-btns">
+            <button type="button" class="btn btn-outline btn-sm" style="flex:1">+ Добавить</button>
+            <button type="button" class="btn btn-danger btn-sm">Удалить</button>
+          </div>
+        </div>
+        <div class="saved-card">
+          <div class="saved-title">Хачапури с рубленой говядиной</div>
+          <div class="saved-meta">360 г</div>
+          <div class="saved-kcal">792<span style="font-size:13px;font-weight:400;color:var(--muted)"> ккал</span></div>
+          <div class="saved-macro">Б 46.8 · Ж 30.6 · У 86.4 · Кл 0</div>
+          <div class="saved-btns">
+            <button type="button" class="btn btn-outline btn-sm" style="flex:1">+ Добавить</button>
+            <button type="button" class="btn btn-danger btn-sm">Удалить</button>
+          </div>
+        </div>
+        <div class="saved-card">
+          <div class="saved-title">Экспонента Био СКР красный</div>
+          <div class="saved-meta">500 мл (пачка)</div>
+          <div class="saved-kcal">180<span style="font-size:13px;font-weight:400;color:var(--muted)"> ккал</span></div>
+          <div class="saved-macro">Б 30 · Ж 0 · У 15 · Кл 0</div>
+          <div class="saved-btns">
+            <button type="button" class="btn btn-outline btn-sm" style="flex:1">+ Добавить</button>
+            <button type="button" class="btn btn-danger btn-sm">Удалить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add saved dish form -->
+    <div class="card form-section">
+      <div class="card-t">Добавить сохранённое блюдо</div>
+      <div class="form-grid">
+        <div class="field span4"><label>Название</label><input type="text" placeholder="Например: греческий салат"></div>
+        <div class="field span4"><label>Порция (описание)</label><input type="text" placeholder="100 г / 1 порция / 250 мл"></div>
+        <div class="field"><label>ккал</label><input type="number" placeholder="0" min="0"></div>
+        <div class="field"><label>Белок, г</label><input type="number" placeholder="0" min="0" step="0.1"></div>
+        <div class="field"><label>Жиры, г</label><input type="number" placeholder="0" min="0" step="0.1"></div>
+        <div class="field"><label>Углеводы, г</label><input type="number" placeholder="0" min="0" step="0.1"></div>
+        <div class="field span4"><label>Клетчатка, г</label><input type="number" placeholder="0" min="0" step="0.1" value="0"></div>
+        <div class="field span4"><button type="button" class="btn btn-primary">Сохранить блюдо</button></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /panel dishes -->
+
+<!-- ══════════════ PANEL: ИСТОРИЯ ══════════════ -->
+<div class="panel" data-panel="history">
+<div class="wrap">
+
+  <div class="sl">Дни</div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="dt-scroll"><table class="dt">
+      <thead>
+        <tr><th>День</th><th>ккал</th><th>Б</th><th>У</th><th>Ж</th><th>Кл</th><th>Вес</th><th>Зап.</th><th>Расход</th><th>Баланс</th></tr>
+      </thead>
+      <tbody>
+        <tr class="row-today"><td><a class="link" href="#">2026-05-09</a></td><td class="td-warn">2211</td><td class="td-ok">149.7</td><td class="td-warn">146</td><td>111.1</td><td class="td-ok">34.7</td><td>84.8 кг</td><td>9</td><td>551.2</td><td class="td-ok">+340.2</td></tr>
+        <tr><td style="color:var(--muted)">2026-05-08</td><td>972</td><td>76.8</td><td>101.4</td><td>30.6</td><td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td><td>2</td><td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="sl">Последние записи</div>
+  <div class="card">
+    <div class="dt-scroll"><table class="dt">
+      <thead>
+        <tr><th>День</th><th>Время</th><th>Описание</th><th>ккал</th><th>Б</th><th>Ж</th><th>У</th><th>Кл</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>22:35</td><td>Pepsi 0 калорий 330 мл</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>22:26</td><td style="color:var(--ok)">Протеиновое печенье 1 шт</td><td class="td-ok">156</td><td>12</td><td>9.5</td><td>5.6</td><td class="td-ok">15</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>21:05</td><td>Сладкий чили-соус 30 г</td><td>60</td><td>0.5</td><td>0.3</td><td>13</td><td>0.3</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>19:00</td><td>WOK Конструктор базовый (~300 г)</td><td>325</td><td>38</td><td>15.2</td><td>9</td><td>1.5</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>17:00</td><td>Red Bull без сахара 250 мл</td><td>10</td><td>0</td><td>0</td><td>1</td><td>0</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>16:00</td><td>Стейк-сэндвич BRUNCH с авокадо 400 г</td><td class="td-warn">861</td><td>44.6</td><td>51.9</td><td class="td-warn">54.3</td><td>5.7</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>15:26</td><td>Апельсиновый сок натуральный 250 мл</td><td>118</td><td>1.7</td><td>0.4</td><td>27.5</td><td>0.8</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>11:07</td><td>Гирин-Ми 330 мл</td><td>63</td><td>0</td><td>0</td><td>15.8</td><td>0</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-09</td><td>11:02</td><td>Тунцовый бутерброд на цельнозерновом хлебе</td><td>618</td><td>52.9</td><td>33.8</td><td>19.8</td><td>11.4</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-08</td><td>вечер</td><td>Экспонента Био СКР 500 мл</td><td>180</td><td>30</td><td>0</td><td>15</td><td>0</td><td><button class="tl-del">Удалить</button></td></tr>
+        <tr><td style="color:var(--muted)">2026-05-08</td><td>обед</td><td>Хачапури с рубленой говядиной 360 г</td><td>792</td><td>46.8</td><td>30.6</td><td>86.4</td><td>0</td><td><button class="tl-del">Удалить</button></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+</div>
+</div><!-- /panel history -->
+
+<script>
+  // Tab switching
+  const tabs   = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.panel');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const t = tab.dataset.tab;
+      tabs.forEach(x => x.classList.toggle('active', x === tab));
+      panels.forEach(p => p.classList.toggle('active', p.dataset.panel === t));
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    });
+  });
+
+  // Animate bars
+  document.querySelectorAll('[data-w]').forEach(el => {
+    const w = el.getAttribute('data-w');
+    el.style.width = '0';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.style.width = w;
+      el.style.transition = 'width 0.9s cubic-bezier(.22,.68,0,1.2)';
+    }));
+  });
+
+  // Checkbox toggle
+  document.querySelectorAll('.check-box').forEach(box => {
+    box.addEventListener('click', () => {
+      const checked = box.dataset.checked === '1';
+      box.dataset.checked = checked ? '0' : '1';
+      box.style.background = checked ? '' : 'var(--accent)';
+      box.style.borderColor = checked ? '' : 'var(--accent)';
+      box.innerHTML = checked ? '' : '<svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    });
+  });
+</script>
+</body>
+</html>
